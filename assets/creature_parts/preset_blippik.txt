@@ -1,0 +1,9 @@
+body=body_round
+eyes=eyes_stalks
+mouth=mouth_snout
+legs=legs_short
+arms=arms_short
+tail=tail_short
+antennae=antennae_straight
+back=back_plates
+pattern=pattern_spots

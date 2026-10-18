@@ -1,0 +1,7 @@
+format=rlsporeman-modular-v2
+cell=48
+directions=8
+walk_frames=4
+pivot_x=24
+pivot_y=41
+draw_order=tail,back,legs,body,pattern,arms,eyes,mouth,antennae

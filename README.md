@@ -1,33 +1,33 @@
 # rlsporeman
 
-Demo de criatura pixel-art para un juego tipo **Spore / Creature Stage**, no un plataformas lateral.
+Modular pixel-art creature asset pack and playable creature-builder demo.
 
-## Asset
+## Asset pack
 
-- criatura alienígena volumétrica legible desde todos los ángulos;
-- atlas de **8 direcciones**: S, SE, E, NE, N, NW, W, SW;
-- **4 cuadros de marcha por dirección**;
-- mismo pivote y escala entre cuadros;
-- render `Nearest`;
-- el atlas está incluido en `src/creature.rle.b64` como imagen indexada/RLE para mantener el repo completamente textual y compilable.
+`assets/creature_parts/` contains **33 independent part assets**, grouped by slot:
 
-## Demo
+- 4 bodies
+- 5 eye sets
+- 5 mouths
+- 4 leg sets
+- 3 arm sets
+- 3 tails
+- 3 antennae
+- 3 back structures
+- 3 skin patterns
 
-- movimiento libre en 8 direcciones;
-- cámara superior/3⁄4 que sigue a la criatura;
-- terreno alienígena desplazable;
-- rocas/obstáculos con colisión;
-- `IDLE` al detenerse y `WALK` al moverse;
-- sombra de contacto para leer la criatura sobre el terreno.
+Every `.part` file defines the visual parameters for one swappable piece. At startup the demo builds matching **8-direction × 4-frame** pixel-art atlases from those parts and layers them on the same pivot. `manifest.txt` defines the shared asset contract and `preset_blippik.txt` is one example creature.
 
-## Compilar
+## Controls
+
+- `WASD` / arrows: move
+- `Tab`: select creature-part slot
+- `Q` / `E`: previous / next part
+
+## Build
 
 ```bash
-git clone https://github.com/glitchaka/rlsporeman.git
-cd rlsporeman
 cargo run --release
 ```
 
-## Controles
-
-- `WASD` o flechas: mover la criatura en 8 direcciones.
+The old `creature.rle.b64` loader is no longer used. All part definitions are embedded with `include_str!`, so the executable does not depend on its working directory or external asset lookup when launched by double-clicking it.

@@ -1,16 +1,14 @@
 use macroquad::prelude::*;
 
-const FRAME_W: u16 = 64;
-const FRAME_H: u16 = 64;
+const CELL: f32 = 32.0;
 const SCALE: f32 = 3.0;
-const SPEED: f32 = 230.0;
-const JUMP: f32 = 470.0;
-const GRAVITY: f32 = 1250.0;
-const FRAME_TIME: f32 = 0.09;
+const SPEED: f32 = 180.0;
+const FRAME_TIME: f32 = 0.12;
+const WORLD: Vec2 = Vec2::new(2200.0, 1500.0);
 
 fn window_conf() -> Conf {
     Conf {
-        window_title: "rlsporeman - playable asset test".into(),
+        window_title: "rlsporeman - creature stage asset test".into(),
         window_width: 1152,
         window_height: 704,
         window_resizable: true,
@@ -18,256 +16,178 @@ fn window_conf() -> Conf {
     }
 }
 
-fn px(img: &mut Image, x: i32, y: i32, c: Color) {
-    if x >= 0 && y >= 0 && x < FRAME_W as i32 && y < FRAME_H as i32 {
-        img.set_pixel(x as u32, y as u32, c);
+fn b64_value(b: u8) -> Option<u8> {
+    match b {
+        b'A'..=b'Z' => Some(b - b'A'),
+        b'a'..=b'z' => Some(b - b'a' + 26),
+        b'0'..=b'9' => Some(b - b'0' + 52),
+        b'+' => Some(62),
+        b'/' => Some(63),
+        _ => None,
     }
 }
 
-fn rect(img: &mut Image, x: i32, y: i32, w: i32, h: i32, c: Color) {
-    for yy in y..y+h { for xx in x..x+w { px(img, xx, yy, c); } }
-}
-
-fn ellipse(img: &mut Image, cx: i32, cy: i32, rx: i32, ry: i32, c: Color) {
-    let rx2 = (rx * rx).max(1) as f32;
-    let ry2 = (ry * ry).max(1) as f32;
-    for y in cy-ry..=cy+ry {
-        for x in cx-rx..=cx+rx {
-            let dx = (x-cx) as f32;
-            let dy = (y-cy) as f32;
-            if dx*dx/rx2 + dy*dy/ry2 <= 1.0 { px(img, x, y, c); }
+fn decode_base64(src: &str) -> Vec<u8> {
+    let mut out = Vec::with_capacity(src.len() * 3 / 4);
+    let mut acc = 0u32;
+    let mut bits = 0u8;
+    for b in src.bytes() {
+        if b == b'=' { break; }
+        let Some(v) = b64_value(b) else { continue; };
+        acc = (acc << 6) | v as u32;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push(((acc >> bits) & 0xff) as u8);
         }
     }
+    out
 }
 
-fn line(img: &mut Image, mut x0: i32, mut y0: i32, x1: i32, y1: i32, c: Color) {
-    let dx = (x1-x0).abs();
-    let sx = if x0 < x1 { 1 } else { -1 };
-    let dy = -(y1-y0).abs();
-    let sy = if y0 < y1 { 1 } else { -1 };
-    let mut err = dx + dy;
-    loop {
-        px(img, x0, y0, c);
-        if x0 == x1 && y0 == y1 { break; }
-        let e2 = 2*err;
-        if e2 >= dy { err += dy; x0 += sx; }
-        if e2 <= dx { err += dx; y0 += sy; }
+fn creature_texture() -> Texture2D {
+    let palette = [
+        (0,0,0,0),(222,188,106,255),(194,146,63,255),(72,158,140,255),
+        (110,131,96,255),(34,150,144,255),(30,139,136,255),(27,129,128,255),
+        (159,109,39,255),(106,102,63,255),(44,116,111,255),(51,97,94,255),
+        (21,118,117,255),(20,109,108,255),(18,101,100,255),(16,91,91,255),
+        (112,70,53,255),(84,62,80,255),(69,65,61,255),(66,42,89,255),
+        (43,70,70,255),(42,47,51,255),(43,35,68,255),(39,26,60,255),
+        (14,81,81,255),(14,73,73,255),(12,62,62,255),(12,51,53,255),
+        (12,44,45,255),(12,36,36,255),(12,24,30,255),(0,0,0,255),
+    ];
+    let packed = decode_base64(include_str!("creature.rle.b64"));
+    let mut img = Image::gen_image_color(128, 256, Color::new(0.,0.,0.,0.));
+    let mut p = 0usize;
+    for pair in packed.chunks_exact(2) {
+        let count = pair[0] as usize;
+        let idx = pair[1] as usize;
+        let (r,g,b,a) = palette[idx];
+        let c = Color::from_rgba(r,g,b,a);
+        for _ in 0..count {
+            if p >= 128*256 { break; }
+            img.set_pixel((p % 128) as u32, (p / 128) as u32, c);
+            p += 1;
+        }
+    }
+    let tex = Texture2D::from_image(&img);
+    tex.set_filter(FilterMode::Nearest);
+    tex
+}
+
+fn dir_row(v: Vec2, last: usize) -> usize {
+    if v.length_squared() < 0.001 { return last; }
+    let a = v.y.atan2(v.x);
+    // Atlas rows: S, SE, E, NE, N, NW, W, SW.
+    let oct = ((a / std::f32::consts::FRAC_PI_4).round() as i32 + 8) % 8;
+    match oct {
+        0 => 2, // E
+        1 => 1, // SE
+        2 => 0, // S
+        3 => 7, // SW
+        4 => 6, // W
+        5 => 5, // NW
+        6 => 4, // N
+        _ => 3, // NE
     }
 }
 
-fn make_frame(frame: Option<usize>) -> Image {
-    let mut img = Image::gen_image_color(FRAME_W, FRAME_H, Color::new(0.,0.,0.,0.));
-    let outline = Color::from_rgba(28,35,42,255);
-    let teal = Color::from_rgba(59,177,157,255);
-    let teal2 = Color::from_rgba(39,135,126,255);
-    let cream = Color::from_rgba(235,216,169,255);
-    let purple = Color::from_rgba(105,71,151,255);
-    let white = Color::from_rgba(246,243,234,255);
-    let pupil = Color::from_rgba(31,24,38,255);
-    let orange = Color::from_rgba(246,170,54,255);
-    let claw = Color::from_rgba(229,220,194,255);
-
-    let (ldx, rdx, bob, arm) = match frame {
-        None => (0,0,0,0),
-        Some(0) => (-2,2,0,2),
-        Some(1) => (-1,1,-1,1),
-        Some(2) => (0,0,0,0),
-        Some(3) => (2,-2,1,-2),
-        Some(4) => (1,-1,0,-1),
-        _ => (0,0,-1,0),
-    };
-
-    // Cola y placas dorsales: mismas posiciones relativas en todos los cuadros.
-    ellipse(&mut img, 14, 42+bob, 6, 4, outline);
-    ellipse(&mut img, 14, 41+bob, 5, 3, teal2);
-    for &(x,y,r) in &[(18,28,4),(15,35,4),(17,42,3)] {
-        ellipse(&mut img, x, y+bob, r+1, r+1, outline);
-        ellipse(&mut img, x, y+bob, r, r, purple);
-    }
-
-    // Piernas: la planta siempre termina en y=57.
-    for (x,dx) in [(26,ldx),(40,rdx)] {
-        ellipse(&mut img, x+dx, 48+bob, 5, 7, outline);
-        ellipse(&mut img, x+dx, 48+bob, 4, 6, teal2);
-        ellipse(&mut img, x+dx, 55, 8, 3, outline);
-        ellipse(&mut img, x+dx, 54, 7, 2, teal);
-    }
-    for x in [21+ldx,26+ldx,35+rdx,40+rdx,45+rdx] { rect(&mut img, x,55,3,2,claw); }
-
-    // Cuerpo principal: exactamente la misma silueta por frame.
-    ellipse(&mut img, 33,36+bob,18,17,outline);
-    ellipse(&mut img, 33,35+bob,17,16,teal);
-    ellipse(&mut img, 35,41+bob,10,10,cream);
-
-    // Brazos: solo cambia el swing.
-    ellipse(&mut img,18,37+bob+arm,6,5,outline);
-    ellipse(&mut img,18,37+bob+arm,5,4,teal);
-    ellipse(&mut img,49,37+bob-arm,6,5,outline);
-    ellipse(&mut img,49,37+bob-arm,5,4,teal);
-    rect(&mut img,13,39+bob+arm,3,2,claw);
-    rect(&mut img,52,39+bob-arm,3,2,claw);
-
-    // Antenas ancladas a la cabeza.
-    line(&mut img,27,22+bob,23,10+bob,outline);
-    line(&mut img,28,22+bob,24,10+bob,teal);
-    line(&mut img,39,22+bob,43,10+bob,outline);
-    line(&mut img,38,22+bob,42,10+bob,teal);
-    ellipse(&mut img,23,9+bob,4,4,outline);
-    ellipse(&mut img,23,9+bob,3,3,orange);
-    ellipse(&mut img,43,9+bob,4,4,outline);
-    ellipse(&mut img,43,9+bob,3,3,orange);
-
-    // Cara.
-    for ex in [27,40] {
-        ellipse(&mut img,ex,28+bob,6,7,outline);
-        ellipse(&mut img,ex,28+bob,5,6,white);
-        ellipse(&mut img,ex+1,29+bob,2,3,pupil);
-        px(&mut img,ex,27+bob,WHITE);
-    }
-    rect(&mut img,31,36+bob,6,1,outline);
-    rect(&mut img,33,37+bob,2,1,outline);
-
-    // Marcas fijas para detectar cualquier inconsistencia entre cuadros.
-    ellipse(&mut img,21,31+bob,2,2,purple);
-    ellipse(&mut img,47,32+bob,2,2,purple);
-    ellipse(&mut img,23,42+bob,2,2,teal2);
-
-    img
-}
-
-fn player_hitbox(pos: Vec2) -> Rect {
-    Rect::new(pos.x+54.0, pos.y+39.0, 84.0, 132.0)
-}
-
-fn overlaps(a: Rect, b: Rect) -> bool {
-    a.x < b.x+b.w && a.x+a.w > b.x && a.y < b.y+b.h && a.y+a.h > b.y
+fn blocked(next: Vec2, rocks: &[Rect]) -> bool {
+    let r = Rect::new(next.x - 23.0, next.y - 18.0, 46.0, 36.0);
+    rocks.iter().any(|x| r.overlaps(x))
 }
 
 #[macroquad::main(window_conf)]
 async fn main() {
-    let mut frames = Vec::<Texture2D>::new();
-    let idle = Texture2D::from_image(&make_frame(None));
-    idle.set_filter(FilterMode::Nearest);
-    frames.push(idle);
-    for i in 0..6 {
-        let t = Texture2D::from_image(&make_frame(Some(i)));
-        t.set_filter(FilterMode::Nearest);
-        frames.push(t);
-    }
+    let creature = creature_texture();
+    let mut pos = vec2(500.0, 520.0);
+    let mut last_dir = 0usize;
+    let mut frame = 0usize;
+    let mut anim_t = 0.0f32;
 
-    let world_w = 2600.0;
-    let platforms = [
-        Rect::new(0.0,560.0,world_w,180.0),
-        Rect::new(430.0,455.0,250.0,24.0),
-        Rect::new(790.0,385.0,190.0,24.0),
-        Rect::new(1120.0,485.0,300.0,24.0),
-        Rect::new(1560.0,420.0,220.0,24.0),
-        Rect::new(1940.0,350.0,260.0,24.0),
+    let rocks = [
+        Rect::new(760.0, 430.0, 120.0, 85.0),
+        Rect::new(1010.0, 690.0, 150.0, 105.0),
+        Rect::new(1450.0, 380.0, 105.0, 130.0),
+        Rect::new(1690.0, 880.0, 180.0, 100.0),
     ];
-
-    let mut pos = vec2(120.0,350.0);
-    let mut vel = Vec2::ZERO;
-    let mut facing = 1.0_f32;
-    let mut grounded = false;
-    let mut walk_clock = 0.0;
-    let mut walk_frame = 0usize;
-    let mut camera_x = 0.0;
 
     loop {
         let dt = get_frame_time().min(0.033);
-        let mut axis = 0.0_f32;
-        if is_key_down(KeyCode::A) || is_key_down(KeyCode::Left) { axis -= 1.0; }
-        if is_key_down(KeyCode::D) || is_key_down(KeyCode::Right) { axis += 1.0; }
-        vel.x = axis*SPEED;
-        if axis != 0.0 { facing = axis.signum(); }
+        let mut input = Vec2::ZERO;
+        if is_key_down(KeyCode::A) || is_key_down(KeyCode::Left) { input.x -= 1.0; }
+        if is_key_down(KeyCode::D) || is_key_down(KeyCode::Right) { input.x += 1.0; }
+        if is_key_down(KeyCode::W) || is_key_down(KeyCode::Up) { input.y -= 1.0; }
+        if is_key_down(KeyCode::S) || is_key_down(KeyCode::Down) { input.y += 1.0; }
+        if input.length_squared() > 0.0 { input = input.normalize(); }
 
-        if grounded && (is_key_pressed(KeyCode::Space) || is_key_pressed(KeyCode::W) || is_key_pressed(KeyCode::Up)) {
-            vel.y = -JUMP;
-            grounded = false;
-        }
-        vel.y += GRAVITY*dt;
+        last_dir = dir_row(input, last_dir);
+        let moving = input.length_squared() > 0.0;
+        if moving {
+            let dx = vec2(input.x * SPEED * dt, 0.0);
+            let dy = vec2(0.0, input.y * SPEED * dt);
+            let nx = vec2((pos.x + dx.x).clamp(40.0, WORLD.x-40.0), pos.y);
+            if !blocked(nx, &rocks) { pos = nx; }
+            let ny = vec2(pos.x, (pos.y + dy.y).clamp(40.0, WORLD.y-40.0));
+            if !blocked(ny, &rocks) { pos = ny; }
 
-        // Movimiento horizontal + colisiones laterales.
-        pos.x += vel.x*dt;
-        pos.x = pos.x.clamp(-54.0, world_w-138.0);
-        let mut hb = player_hitbox(pos);
-        for p in platforms {
-            if overlaps(hb,p) {
-                if vel.x > 0.0 { pos.x = p.x-138.0; }
-                else if vel.x < 0.0 { pos.x = p.x+p.w-54.0; }
-                vel.x = 0.0;
-                hb = player_hitbox(pos);
-            }
-        }
-
-        // Movimiento vertical + suelo/plataformas.
-        let prev_bottom = hb.y+hb.h;
-        pos.y += vel.y*dt;
-        grounded = false;
-        hb = player_hitbox(pos);
-        for p in platforms {
-            if overlaps(hb,p) {
-                if vel.y >= 0.0 && prev_bottom <= p.y+8.0 {
-                    pos.y = p.y-171.0;
-                    vel.y = 0.0;
-                    grounded = true;
-                } else if vel.y < 0.0 {
-                    pos.y = p.y+p.h-39.0;
-                    vel.y = 0.0;
-                }
-                hb = player_hitbox(pos);
-            }
-        }
-
-        if pos.y > 760.0 { pos = vec2(120.0,350.0); vel = Vec2::ZERO; }
-
-        if grounded && axis != 0.0 {
-            walk_clock += dt;
-            if walk_clock >= FRAME_TIME {
-                walk_clock -= FRAME_TIME;
-                walk_frame = (walk_frame+1)%6;
+            anim_t += dt;
+            if anim_t >= FRAME_TIME {
+                anim_t -= FRAME_TIME;
+                frame = (frame + 1) % 4;
             }
         } else {
-            walk_clock = 0.0;
-            walk_frame = 0;
+            frame = 0;
+            anim_t = 0.0;
         }
 
-        let target_camera = (pos.x - screen_width()*0.42).clamp(0.0,(world_w-screen_width()).max(0.0));
-        camera_x += (target_camera-camera_x)*(1.0-(-10.0*dt).exp());
+        let cam = vec2(
+            (pos.x - screen_width()/2.0).clamp(0.0, (WORLD.x-screen_width()).max(0.0)),
+            (pos.y - screen_height()/2.0).clamp(0.0, (WORLD.y-screen_height()).max(0.0)),
+        );
 
-        clear_background(Color::from_rgba(135,183,202,255));
+        clear_background(Color::from_rgba(121, 164, 95, 255));
 
-        // Fondo simple con parallax.
-        for i in 0..18 {
-            let x = i as f32*190.0 - (camera_x*0.25)%190.0;
-            draw_rectangle(x,430.0-(i%3) as f32*28.0,100.0,130.0,Color::from_rgba(101,145,157,255));
+        // Alien ground: broad patches, paths, plants and stones to give scale/depth.
+        for y in (0..1500).step_by(96) {
+            for x in (0..2200).step_by(96) {
+                let odd = ((x/96 + y/96) & 1) == 0;
+                let c = if odd { Color::from_rgba(117,158,89,255) } else { Color::from_rgba(125,169,96,255) };
+                draw_rectangle(x as f32-cam.x, y as f32-cam.y, 96.0, 96.0, c);
+            }
+        }
+        draw_circle(1120.0-cam.x, 520.0-cam.y, 280.0, Color::from_rgba(156,154,99,255));
+        draw_circle(1780.0-cam.x, 350.0-cam.y, 190.0, Color::from_rgba(106,151,102,255));
+
+        for i in 0..42 {
+            let wx = ((i*173 + 91) % 2150) as f32;
+            let wy = ((i*271 + 133) % 1450) as f32;
+            let sx = wx-cam.x; let sy = wy-cam.y;
+            draw_line(sx,sy,sx-5.0,sy-13.0,3.0,Color::from_rgba(55,111,67,255));
+            draw_line(sx,sy,sx+7.0,sy-10.0,3.0,Color::from_rgba(64,122,71,255));
         }
 
-        for p in platforms {
-            draw_rectangle(p.x-camera_x,p.y,p.w,p.h,Color::from_rgba(83,103,61,255));
-            draw_rectangle(p.x-camera_x,p.y,p.w,6.0,Color::from_rgba(117,143,82,255));
+        for r in rocks {
+            let x=r.x-cam.x; let y=r.y-cam.y;
+            draw_ellipse(x+r.w/2.0, y+r.h/2.0+8.0, r.w*0.48, r.h*0.36, 0.0, Color::new(0.,0.,0.,0.18));
+            draw_ellipse(x+r.w/2.0, y+r.h/2.0, r.w*0.5, r.h*0.5, 0.0, Color::from_rgba(92,93,78,255));
+            draw_ellipse(x+r.w*0.43, y+r.h*0.38, r.w*0.31, r.h*0.26, 0.0, Color::from_rgba(124,126,98,255));
         }
 
-        let texture_index = if grounded && axis != 0.0 { walk_frame+1 } else { 0 };
-        let draw_pos = vec2(pos.x-camera_x,pos.y);
+        let draw_size = CELL*SCALE;
+        let foot = vec2(pos.x-cam.x, pos.y-cam.y);
+        draw_ellipse(foot.x, foot.y+15.0, 31.0, 13.0, 0.0, Color::new(0.,0.,0.,0.22));
+        let source = Rect::new(frame as f32*CELL, last_dir as f32*CELL, CELL, CELL);
         draw_texture_ex(
-            &frames[texture_index],
-            draw_pos.x,
-            draw_pos.y,
+            &creature,
+            foot.x-draw_size/2.0,
+            foot.y-draw_size+25.0,
             WHITE,
-            DrawTextureParams {
-                dest_size: Some(vec2(FRAME_W as f32*SCALE,FRAME_H as f32*SCALE)),
-                flip_x: facing < 0.0,
-                ..Default::default()
-            },
+            DrawTextureParams { dest_size: Some(vec2(draw_size,draw_size)), source: Some(source), ..Default::default() },
         );
 
-        draw_rectangle(12.0,12.0,500.0,72.0,Color::new(0.0,0.0,0.0,0.55));
-        draw_text("A/D o flechas: mover   ESPACIO/W/arriba: saltar",24.0,40.0,23.0,WHITE);
-        draw_text(
-            if grounded && axis != 0.0 { &format!("estado: WALK  frame {}/6",walk_frame+1) } else if grounded { "estado: IDLE" } else { "estado: AIR" },
-            24.0,66.0,23.0,WHITE
-        );
+        draw_rectangle(12.0,12.0,430.0,68.0,Color::new(0.,0.,0.,0.52));
+        draw_text("WASD / flechas: mover en 8 direcciones",24.0,39.0,22.0,WHITE);
+        draw_text(&format!("dir: {}   frame: {}   {}", last_dir, frame+1, if moving {"WALK"} else {"IDLE"}),24.0,64.0,20.0,WHITE);
 
         next_frame().await;
     }

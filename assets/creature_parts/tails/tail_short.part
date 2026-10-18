@@ -1,0 +1,7 @@
+name=tail_short
+kind=tail
+variant=short
+primary=287E77
+secondary=5E4A86
+a=13
+b=7

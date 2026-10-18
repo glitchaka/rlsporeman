@@ -1,12 +1,23 @@
 # rlsporeman
 
-Demo mínimo para comprobar si la hoja de sprites generada funciona realmente como un asset animado.
+Demo jugable para comprobar un sprite procedural coherente dentro de un juego real.
 
-La criatura usa directamente un spritesheet de 6 cuadros y camina sobre una superficie. El render usa filtro `Nearest` para no suavizar el pixel art.
+## Qué contiene
+
+- personaje controlable;
+- estado `IDLE`;
+- ciclo `WALK` de 6 cuadros;
+- salto;
+- gravedad;
+- suelo y plataformas;
+- colisiones laterales y verticales;
+- cámara con seguimiento;
+- cambio de dirección;
+- render `Nearest` para pixel art.
+
+El sprite se construye dentro del programa como cuadros reales de 64×64 con las mismas proporciones, silueta, marcas y línea de apoyo. Así el repositorio no depende del spritesheet roto anterior.
 
 ## Compilar
-
-Necesitas Rust estable y Cargo.
 
 ```bash
 git clone https://github.com/glitchaka/rlsporeman.git
@@ -14,22 +25,10 @@ cd rlsporeman
 cargo run --release
 ```
 
-El primer build descargará `macroquad` y sus dependencias.
-
 ## Controles
 
-- `A` / `←`: mover a la izquierda
-- `D` / `→`: mover a la derecha
-- `Espacio`: pausar/reanudar
-- Sin pulsar teclas, la criatura continúa caminando automáticamente y rebota en los extremos de la ventana.
+- `A` / `←`: izquierda
+- `D` / `→`: derecha
+- `Espacio`, `W` o `↑`: saltar
 
-## Asset
-
-`assets/blippik_walk_spritesheet.png`
-
-- 6 cuadros horizontales
-- celda: 160 × 180 px
-- fondo transparente
-- el demo selecciona cada cuadro mediante un rectángulo de origen en la textura
-
-La finalidad de este proyecto es detectar de forma visible si existen saltos de anatomía, escala, alineación o volumen entre cuadros. No pretende ocultar esos defectos con interpolación.
+La demo no mueve al personaje automáticamente: responde al jugador y cambia entre idle, walk y aire según su estado.
